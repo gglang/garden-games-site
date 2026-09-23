@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>garden games</title>
+  <meta name="description" content="Garden Games Inc.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%231E3B2C'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23F2C14E'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --sprout: #E4ECDA;
+      --forest: #1E3B2C;
+      --moss: #4E6B52;
+      --marigold: #F2C14E;
+      --marigold-deep: #E0A92A;
+      /* shader palette */
+      --bg-1: #BFD8B8;
+      --bg-2: #F2C14E;
+      --bg-3: #CBB9EA;
+      color-scheme: light dark;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --sprout: #16291F;
+        --forest: #E4ECDA;
+        --moss: #A9BFAB;
+        --bg-1: #24452F;
+        --bg-2: #8C6A1C;
+        --bg-3: #3F3263;
+      }
+    }
+    * { box-sizing: border-box; margin: 0; }
+    html, body { height: 100%; }
+    body {
+      background: var(--sprout);
+      color: var(--forest);
+      font-family: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+      display: grid;
+      grid-template-rows: 1fr auto;
+      min-height: 100%;
+      padding: max(6vw, 24px);
+      padding-top: calc(max(6vw, 24px) + env(safe-area-inset-top, 0px));
+      padding-bottom: calc(max(4vw, 20px) + env(safe-area-inset-bottom, 0px));
+    }
+    #field {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: -1;
+      pointer-events: none;
+    }
+    main {
+      align-self: end;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: clamp(28px, 4vw, 48px);
+    }
+    h1 {
+      font-weight: 800;
+      font-size: clamp(3.5rem, 15vw, 13rem);
+      line-height: 0.86;
+      letter-spacing: -0.045em;
+      font-variation-settings: "opsz" 96;
+    }
+    .email {
+      display: inline-block;
+      background: var(--forest);
+      color: var(--sprout);
+      font-size: 1.125rem;
+      font-weight: 800;
+      text-decoration: none;
+      padding: 0.9em 1.6em;
+      border-radius: 999px;
+      transition: transform 120ms ease;
+    }
+    .email:hover { transform: scale(1.04); }
+    .email:focus-visible { outline: 3px solid var(--forest); outline-offset: 4px; }
+    footer {
+      margin-top: clamp(40px, 8vw, 96px);
+      font-size: 0.875rem;
+      font-weight: 400;
+      color: var(--forest);
+      opacity: 0.75;
+    }
+    @media (prefers-reduced-motion: reduce) { .email { transition: none; } }
+  </style>
+</head>
+<body>
+  <canvas id="field" aria-hidden="true"></canvas>
+  <main>
+    <h1>garden<br>games</h1>
+    <a class="email" href="mailto:gerald@garden.games">Email us</a>
+  </main>
+  <footer>Garden Games Inc.</footer>
+
+  <script>
+  /*
+    The background is a slow "diffusion" loop: the field starts as pure grain,
+    detail resolves octave by octave into warped organic shapes, holds for a
+    moment, then dissolves back into noise and a new form emerges.
+  */
+  (function () {
+    const canvas = document.getElementById('field');
+    const gl = canvas.getContext('webgl', { antialias: false, premultipliedAlpha: false });
+    if (!gl) return; // body background colour remains as the fallback
+
+    const vert = `
+      attribute vec2 p;
+      void main() { gl_Position = vec4(p, 0.0, 1.0); }
+    `;
+
+    const frag = `
+      precision highp float;
+      uniform vec2 uRes;
+      uniform float uTime;
+      uniform float uSeed;
+      uniform vec3 uC0, uC1, uC2, uC3;
+
+      float hash(vec2 p) {
+        p = fract(p * vec2(123.34, 456.21));
+        p += dot(p, p + 45.32);
+        return fract(p.x * p.y);
+      }
+
+      float noise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+                   mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+      }
+
+      // fbm whose finer octaves fade in as "detail" goes 0 -> 1
+      float fbm(vec2 p, float detail) {
+        float v = 0.0;
+        float a = 0.5;
+        mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
+        for (int i = 0; i < 6; i++) {
+          float w = clamp(detail * 6.0 - float(i) + 0.5, 0.0, 1.0);
+          v += a * mix(0.5, noise(p), w);
+          p = m * p;
+          a *= 0.5;
+        }
+        return v;
+      }
+
+      void main() {
+        vec2 uv = gl_FragCoord.xy / uRes.y;
+        float t = uTime * 0.035;
+
+        // 16 second denoise cycle: resolve, hold, dissolve
+        float cycle = fract(uTime / 16.0);
+        float detail = smoothstep(0.0, 0.5, cycle) * (1.0 - smoothstep(0.82, 1.0, cycle));
+        float epoch = floor(uTime / 16.0) + uSeed;
+        vec2 shift = vec2(hash(vec2(epoch, 1.7)), hash(vec2(3.1, epoch))) * 40.0;
+
+        vec2 p = uv * 1.4 + shift;
+        vec2 q = vec2(fbm(p + t, detail), fbm(p + vec2(5.2, 1.3) - t, detail));
+        vec2 r = vec2(fbm(p + 4.0 * q + vec2(1.7, 9.2) + t * 1.3, detail),
+                      fbm(p + 4.0 * q + vec2(8.3, 2.8) - t, detail));
+        float f = fbm(p + 4.0 * r, detail);
+
+        vec3 col = uC0;
+        col = mix(col, uC1, smoothstep(0.38, 0.68, f));
+        col = mix(col, uC3, smoothstep(0.72, 0.98, length(q)) * 0.8);
+        col = mix(col, uC2, smoothstep(0.6, 0.78, r.x) * 0.9);
+
+        // grain: heavy while "noisy", a faint film grain once resolved
+        float g = hash(gl_FragCoord.xy + fract(uTime * 7.0) * 917.0) - 0.5;
+        col += g * (0.22 * (1.0 - detail) + 0.035);
+
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `;
+
+    function compile(type, src) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        console.warn(gl.getShaderInfoLog(s));
+        return null;
+      }
+      return s;
+    }
+
+    const vs = compile(gl.VERTEX_SHADER, vert);
+    const fs = compile(gl.FRAGMENT_SHADER, frag);
+    if (!vs || !fs) return;
+
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return;
+    gl.useProgram(prog);
+
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, 'p');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+
+    const u = {
+      res: gl.getUniformLocation(prog, 'uRes'),
+      time: gl.getUniformLocation(prog, 'uTime'),
+      seed: gl.getUniformLocation(prog, 'uSeed'),
+      c: ['uC0', 'uC1', 'uC2', 'uC3'].map(n => gl.getUniformLocation(prog, n))
+    };
+    gl.uniform1f(u.seed, Math.floor(Math.random() * 1000));
+
+    function hexToRgb(hex) {
+      const h = hex.trim().replace('#', '');
+      return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) / 255);
+    }
+
+    function setPalette() {
+      const cs = getComputedStyle(document.documentElement);
+      ['--sprout', '--bg-1', '--bg-2', '--bg-3'].forEach((name, i) => {
+        gl.uniform3fv(u.c[i], hexToRgb(cs.getPropertyValue(name)));
+      });
+    }
+
+    // Render at reduced resolution: the field is soft and grainy anyway.
+    function resize() {
+      const scale = Math.min(window.devicePixelRatio || 1, 2) * 0.5;
+      canvas.width = Math.max(1, Math.round(window.innerWidth * scale));
+      canvas.height = Math.max(1, Math.round(window.innerHeight * scale));
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.uniform2f(u.res, canvas.width, canvas.height);
+    }
+
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const darkMode = window.matchMedia('(prefers-color-scheme: dark)');
+    let start = performance.now();
+    let raf = null;
+
+    function draw(now) {
+      gl.uniform1f(u.time, (now - start) / 1000);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
+    function loop(now) {
+      draw(now);
+      raf = requestAnimationFrame(loop);
+    }
+
+    function run() {
+      cancelAnimationFrame(raf);
+      raf = null;
+      if (reduceMotion.matches) {
+        // one fully resolved still frame
+        start = performance.now() - 9000;
+        draw(performance.now());
+      } else if (!document.hidden) {
+        raf = requestAnimationFrame(loop);
+      }
+    }
+
+    setPalette();
+    resize();
+    run();
+
+    window.addEventListener('resize', () => { resize(); if (reduceMotion.matches) run(); });
+    document.addEventListener('visibilitychange', run);
+    reduceMotion.addEventListener('change', run);
+    darkMode.addEventListener('change', () => { setPalette(); if (reduceMotion.matches) run(); });
+  })();
+  </script>
+</body>
+</html>
